@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
@@ -26,7 +27,8 @@ RESULTS_DIR = '../../results'
 PLOTS_DIR = '../../plots'
 
 MAX_TICKERS = 300
-
+START_DATE = '2016-03-01'
+END_DATE = datetime.today().strftime('%Y-%m-%d')
 TARGET_COL = '21 Day Forward Return'
 
 # Model Parameters
@@ -253,6 +255,48 @@ def plot_predictions(ticker, y_train, y_train_pred, y_val, y_val_pred,
     plt.savefig(f'{PLOTS_DIR}/{ticker}_predictions.png', dpi=150, bbox_inches='tight')
     plt.close()
 
+def add_callbacks(ticker):
+    callbacks = [
+        EarlyStopping(
+            monitor='val_loss',
+            patience=15,
+            restore_best_weights=True,
+            verbose=0
+        ),
+        ModelCheckpoint(
+            filepath=f'{MODELS_DIR}/lstm_{ticker}_best.keras',
+            monitor='val_loss',
+            save_best_only=True,
+            verbose=0
+        ),
+        ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=5,
+            min_lr=0.00001,
+            verbose=0
+        )
+    ]
+
+    return callbacks
+
+def generate_forecast(df_inference, scaler_X, scaler_y, pca, model):
+    X_raw = df_inference[feature_cols].values
+
+    # Reshape and process through fitted objects
+    X_seq = X_raw.reshape(1, WINDOW, len(feature_cols))
+    X_flat = X_seq.reshape(-1, len(feature_cols))
+
+    X_scaled_flat = scaler_X.transform(X_flat)
+    X_pca_flat = pca.transform(X_scaled_flat)
+    X_scaled = X_pca_flat.reshape(1, WINDOW, -1)
+
+    # Predict and inverse scale
+    forecast_scaled = model.predict(X_scaled, verbose=0)
+    forecast_log = scaler_y.inverse_transform(forecast_scaled)[0][0]
+
+    return (np.exp(forecast_log) - 1) * 100
+
 def train_ticker_model(ticker, df_ticker):
     print(f"\n{'=' * 70}")
     print(f"🎯 Training model for: {ticker}")
@@ -267,16 +311,13 @@ def train_ticker_model(ticker, df_ticker):
         return None
 
     df_ticker = df_ticker.copy()
-    df_ticker = df_ticker.dropna(subset=feature_cols + [TARGET_COL])
 
-    if len(df_ticker) < 300:
-        print(f"⚠️  Skipping {ticker}: Insufficient data after dropna ({len(df_ticker)} rows)")
-        return None
+    # Create the truncated version for training (Lags by 21 days due to TARGET_COL)
+    df_ticker_truncated = df_ticker.dropna(subset=feature_cols + [TARGET_COL])
+    print(f"📊 Data points: {len(df_ticker_truncated)}")
 
-    print(f"📊 Data points: {len(df_ticker)}")
-
-    X_raw = df_ticker[feature_cols].values
-    y_raw = df_ticker[TARGET_COL].values
+    X_raw = df_ticker_truncated[feature_cols].values
+    y_raw = df_ticker_truncated[TARGET_COL].values
 
     X, y = create_sequences(X_raw, y_raw, WINDOW)
 
@@ -336,29 +377,7 @@ def train_ticker_model(ticker, df_ticker):
     y_test_scaled = scaler_y.transform(y_test_raw.reshape(-1, 1))
 
     model = build_model((X_train_scaled.shape[1], X_train_scaled.shape[2]))
-
-    # Callbacks
-    callbacks = [
-        EarlyStopping(
-            monitor='val_loss',
-            patience=15,
-            restore_best_weights=True,
-            verbose=0
-        ),
-        ModelCheckpoint(
-            filepath=f'{MODELS_DIR}/lstm_{ticker}_best.keras',
-            monitor='val_loss',
-            save_best_only=True,
-            verbose=0
-        ),
-        ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.5,
-            patience=5,
-            min_lr=0.00001,
-            verbose=0
-        )
-    ]
+    callbacks = add_callbacks(ticker)
 
     # Train
     print(f"🚀 Training...", end='', flush=True)
@@ -406,60 +425,35 @@ def train_ticker_model(ticker, df_ticker):
     except Exception as e:
         print(f"   ⚠️  Error creating plot: {str(e)}")
 
-    # --------------------- FUTURE FORECAST ------------------------
-
-    # Get the last 30 days of data for the sequence
+    # Get the last 30 days of data for the sequence.
     df_inference = df_ticker.tail(WINDOW).copy()
+    forecast_pct = generate_forecast(df_inference, scaler_X, scaler_y, pca, model)
+    forecast_target_date = df_inference.index[-1] + pd.tseries.offsets.Day(31)
 
-    if len(df_inference) < WINDOW:
-        latest_forecast = None
-        latest_date = None
-    else:
-        # We use the features from the most recent dates to predict the future
-        X_inference_raw = df_inference[feature_cols].values
-
-        # Reshape for scaling/PCA (1 sequence, 30 days, 8 features)
-        X_inference_sequence = X_inference_raw.reshape(1, WINDOW, len(feature_cols))
-        X_inference_flat = X_inference_sequence.reshape(-1, len(feature_cols))
-
-        # Using existing fitted scalars and pca
-        X_inference_scaled_flat = scaler_X.transform(X_inference_flat)
-        X_inference_pca_flat = pca.transform(X_inference_scaled_flat)
-        X_inference_scaled = X_inference_pca_flat.reshape(1, WINDOW, N_COMPONENTS)
-
-        # Predict the forward return
-        forecast_scaled = model.predict(X_inference_scaled, verbose=0)
-        forecast_log = scaler_y.inverse_transform(forecast_scaled)[0][0]
-
-        forecast_simple_pct = (np.exp(forecast_log) - 1) * 100
-
-        data_cutoff_date = df_inference.index[-1]
-        latest_date = data_cutoff_date + pd.tseries.offsets.Day(31)
-
-        print(f"   📈 Data through: {data_cutoff_date.date()}")
-        print(f"   🚀 Forecast for {latest_date.date()}: {forecast_simple_pct:.2f}%")
+    print(f"   🚀 Forecast return from {df_inference.index[-1].date()} to {forecast_target_date.date()}: {forecast_pct:.2f}%")
 
     results = {
         'ticker': ticker,
         'epochs_trained': epochs_trained,
+
+        # Training
         'train_r2': train_metrics['r2'],
         'train_rmse': train_metrics['rmse'],
-        'train_mae': train_metrics['mae'],
         'train_dir_acc': train_metrics['direction_accuracy'],
+
+        # Validation
         'val_r2': val_metrics['r2'],
         'val_rmse': val_metrics['rmse'],
-        'val_mae': val_metrics['mae'],
         'val_dir_acc': val_metrics['direction_accuracy'],
+
+        # Test
         'test_r2': test_metrics['r2'],
         'test_rmse': test_metrics['rmse'],
-        'test_mae': test_metrics['mae'],
         'test_dir_acc': test_metrics['direction_accuracy'],
-        'final_train_loss': history.history['loss'][-1],
-        'final_val_loss': history.history['val_loss'][-1],
-        'best_val_loss': min(history.history['val_loss']),
-        'training_time_sec': elapsed,
-        'latest_date': latest_date,
-        'forecast_return': forecast_simple_pct if len(df_inference) >= WINDOW else None
+
+        # Output
+        'target_date': forecast_target_date,
+        'forecast_return': forecast_pct if len(df_inference) >= WINDOW else None
     }
 
     return results
@@ -476,7 +470,6 @@ data = pd.read_csv(DATA_PATH)
 data['Date'] = pd.to_datetime(data['Date'])
 data = data.sort_values(['Ticker', 'Date'])
 data.set_index('Date', inplace=True)
-
 print(f"\n🔍 Raw columns in CSV:")
 print(data.columns.tolist())
 
@@ -490,15 +483,13 @@ if missing_base:
 
 print("✅ All required base columns found!")
 
-# Filter to post-2016
-data = data[data.index >= '2016-03-01']
-print(f"📅 Filtered to post-2016: {len(data)} rows")
+data = data[(data.index >= START_DATE) & (data.index <= END_DATE)]
+print(f"📅 {len(data)} rows starting from {START_DATE} to {END_DATE} found!")
 
 # Get unique tickers, up to MAX_TICKERS
 tickers = data['Ticker'].unique()[:MAX_TICKERS]
 print(f"📋 Processing {len(tickers)} tickers (limited to {MAX_TICKERS})")
 
-# Confirm
 print(f"\n{'=' * 70}")
 print(f"⚠️  About to train {len(tickers)} models")
 print(f"   Estimated time: ~{len(tickers)/3} minutes")
@@ -549,7 +540,7 @@ results_df = results_df.sort_values('test_dir_acc', ascending=False)
 results_df.to_csv(f'{RESULTS_DIR}/results.csv', index=False)
 
 # Save forecasts (simple version of results)
-forecasts_df = results_df[['ticker', 'latest_date', 'forecast_return',
+forecasts_df = results_df[['ticker', 'target_date', 'forecast_return',
                            'test_dir_acc', 'test_r2']].copy()
 forecasts_df = forecasts_df.dropna(subset=['forecast_return'])
 forecasts_df.to_csv(f'{RESULTS_DIR}/latest_forecasts.csv', index=False)
