@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+from pathlib import Path
 from datetime import datetime, timedelta
 
 class DataCollector:
@@ -26,7 +27,7 @@ class DataCollector:
         return self.clean_data
 
     def load_tickers(self):
-        """Assumes that tickers are in a text file, one after the other."""
+        """ Assumes that tickers are in a text file, one after the other. """
         with open(self.ticker_path, 'r') as file:
             return [line.strip() for line in file]
 
@@ -95,9 +96,11 @@ class DataCollector:
             self.clean_data.to_csv(target_path, index = False)
             print(f"Data saved to {target_path}")
 
+project_root = Path(__file__).resolve().parents[2]
+
 collector = DataCollector(
-    ticker_path = '../../data/ESGU_Tickers.txt',
-    file_path = '../../data/ESGU_LSTM_Ready.csv',
+    ticker_path = str(project_root / "data" / "ESGU_Tickers.txt"),
+    file_path = str(project_root / "data" / "ESGU_LSTM_Ready.csv"),
     period = '12y',
     interval = '1d'
 )
@@ -105,5 +108,5 @@ collector = DataCollector(
 collector.append_data()
 
 data = collector.get_clean_data()
-print(data)
+collector.save_data()
 
