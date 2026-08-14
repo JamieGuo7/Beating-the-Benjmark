@@ -1,0 +1,137 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import os
+
+def analyze_portfolio_against_industry(input_file_path: str, output_file_path: str):
+    """
+    Reads a predefined list of tickers from a file, fetches fundamental data, 
+    calculates industry averages, and explicitly returns 'Yes' or 'No' 
+    for whether each ticker beats the industry average.
+    """
+    print(f"Reading tickers from {input_file_path}...")
+    
+    # Check if file exists
+    if not os.path.exists(input_file_path):
+        print(f"Error: The file {input_file_path} does not exist.")
+        print(f"Please ensure your file is located inside the 'data' folder.")
+        return pd.DataFrame()
+        
+    # 1. Read the text file
+    try:
+        with open(input_file_path, 'r') as f:
+            # Strip whitespace, newline characters, and remove any empty lines
+            tickers = [line.strip().upper() for line in f if line.strip()]
+    except Exception as e:
+        print(f"Error reading {input_file_path}: {e}")
+        return pd.DataFrame()
+        
+    # Remove duplicates while preserving order
+    tickers = list(dict.fromkeys(tickers))
+    print(f"Found {len(tickers)} unique tickers.")
+    
+    records = []
+    
+    # 2. Fetch data for each ticker using yfinance
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            records.append({
+                'Ticker': ticker,
+                'Sector': info.get('sector', 'Unknown'),
+                'Industry': info.get('industry', 'Unknown'),
+                'PE_Ratio': info.get('trailingPE', np.nan),
+                'PB_Ratio': info.get('priceToBook', np.nan),
+                'ROE': info.get('returnOnEquity', np.nan),
+                'Debt_to_Equity': info.get('debtToEquity', np.nan)
+            })
+        except Exception as e:
+            print(f"Warning: Could not fetch data for {ticker}: {e}")
+            
+    df = pd.DataFrame(records)
+    
+    if df.empty:
+        print("No data was fetched. Exiting.")
+        return df
+    
+    # 3. Calculate Industry Averages
+    industry_avgs = df.groupby('Industry')[['PE_Ratio', 'PB_Ratio', 'ROE', 'Debt_to_Equity']].mean().reset_index()
+    
+    industry_avgs = industry_avgs.rename(columns={
+        'PE_Ratio': 'Ind_Avg_PE',
+        'PB_Ratio': 'Ind_Avg_PB',
+        'ROE': 'Ind_Avg_ROE',
+        'Debt_to_Equity': 'Ind_Avg_Debt_Equity'
+    })
+    
+    # 4. Merge averages back to the main dataframe
+    df = df.merge(industry_avgs, on='Industry', how='left')
+    
+    # 5. Determine if the ticker "beats" the industry average (Output 'Yes' or 'No')
+    
+    # Valuation & Leverage (Lower is better)
+    df['Beats_Ind_PE'] = df.apply(
+        lambda row: 'Yes' if pd.notna(row['PE_Ratio']) and row['PE_Ratio'] < row['Ind_Avg_PE'] 
+        else ('No' if pd.notna(row['PE_Ratio']) else 'N/A'), 
+        axis=1
+    )
+    df['Beats_Ind_PB'] = df.apply(
+        lambda row: 'Yes' if pd.notna(row['PB_Ratio']) and row['PB_Ratio'] < row['Ind_Avg_PB'] 
+        else ('No' if pd.notna(row['PB_Ratio']) else 'N/A'), 
+        axis=1
+    )
+    df['Beats_Ind_Debt'] = df.apply(
+        lambda row: 'Yes' if pd.notna(row['Debt_to_Equity']) and row['Debt_to_Equity'] < row['Ind_Avg_Debt_Equity'] 
+        else ('No' if pd.notna(row['Debt_to_Equity']) else 'N/A'), 
+        axis=1
+    )
+    
+    # Profitability (Higher is better)
+    df['Beats_Ind_ROE'] = df.apply(
+        lambda row: 'Yes' if pd.notna(row['ROE']) and row['ROE'] > row['Ind_Avg_ROE'] 
+        else ('No' if pd.notna(row['ROE']) else 'N/A'), 
+        axis=1
+    )
+    
+    # Calculate a score of how many metrics beat the industry average
+    df['Total_Metrics_Beaten'] = df[['Beats_Ind_PE', 'Beats_Ind_PB', 'Beats_Ind_ROE', 'Beats_Ind_Debt']].apply(
+        lambda x: (x == 'Yes').sum(), axis=1
+    )
+    
+    # 6. Save the final analyzed dataset
+    # Make sure the output directory exists
+    os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+    df.to_csv(output_file_path, index=False)
+    print(f"Analysis complete. Results saved to {output_file_path}")
+    
+    return df
+
+if __name__ == "__main__":
+    # Define file paths using relative paths to point to a 'data' folder
+    # This assumes the script is run from the directory containing the 'data' folder
+    
+    DATA_FOLDER = "data"
+    INPUT_FILE_NAME = "ESGU_Tickers.txt"
+    OUTPUT_FILE_NAME = "portfolio_industry_analysis.csv"
+    
+    # Construct the full paths safely across different operating systems
+    # e.g., 'data/ESGU_Tickers.txt'
+    INPUT_PATH = os.path.join(DATA_FOLDER, INPUT_FILE_NAME)
+    OUTPUT_PATH = os.path.join(DATA_FOLDER, OUTPUT_FILE_NAME)
+    
+    print(f"Looking for input file at: {INPUT_PATH}")
+    
+    # Check if the data folder exists, if not, create it to instruct the user
+    if not os.path.exists(DATA_FOLDER):
+        print(f"Creating a '{DATA_FOLDER}' folder for you.")
+        print(f"Please place your '{INPUT_FILE_NAME}' inside the 'data' folder and run the script again.")
+        os.makedirs(DATA_FOLDER, exist_ok=True)
+    else:
+        results = analyze_portfolio_against_industry(INPUT_PATH, OUTPUT_PATH)
+        
+        if not results.empty:
+            print("\nTop Stocks (Beating the most industry averages):")
+            top_stocks = results.sort_values(by='Total_Metrics_Beaten', ascending=False)
+            print(top_stocks[['Ticker', 'Industry', 'Total_Metrics_Beaten', 'Beats_Ind_PE', 'Beats_Ind_ROE']].head(10))
