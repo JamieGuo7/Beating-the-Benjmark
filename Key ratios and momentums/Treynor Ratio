@@ -1,0 +1,42 @@
+if df.empty:
+        print("No data was fetched. Exiting.")
+        return
+        
+    # Sort by Treynor Ratio (highest to lowest)
+    df_sorted = df.sort_values(by='Treynor_Ratio', ascending=False)
+    
+    # Save full results
+    os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+    df_sorted.to_csv(output_file_path, index=False)
+    
+    # Display Top 20
+    print("\n" + "="*50)
+    print("TOP 20 STOCKS BY TREYNOR RATIO (Risk-Free Rate: 3.8%)")
+    print("="*50)
+    print(f"{'Rank':<6} | {'Ticker':<10} | {'Treynor Ratio':<15}")
+    print("-" * 35)
+    
+    top_20 = df_sorted.head(20)
+    for idx, row in top_20.iterrows():
+        rank = top_20.index.get_loc(idx) + 1
+        print(f"{rank:<6} | {row['Ticker']:<10} | {row['Treynor_Ratio']:<15.4f}")
+        
+    print("="*50)
+    print(f"Full results saved to: {output_file_path}")
+    
+    return df_sorted
+
+if __name__ == "__main__":
+    # Adjust these paths to match your project structure
+    DATA_FOLDER = "data"
+    INPUT_FILE_NAME = "ESGU_Tickers.txt"
+    OUTPUT_FILE_NAME = "treynor_ratio_analysis.csv"
+    
+    INPUT_PATH = os.path.join(DATA_FOLDER, INPUT_FILE_NAME)
+    OUTPUT_PATH = os.path.join(DATA_FOLDER, OUTPUT_FILE_NAME)
+    
+    if not os.path.exists(DATA_FOLDER):
+        print(f"Creating a '{DATA_FOLDER}' folder. Please place {INPUT_FILE_NAME} inside it.")
+        os.makedirs(DATA_FOLDER, exist_ok=True)
+    else:
+        analyze_treynor_top_stocks(INPUT_PATH, OUTPUT_PATH)
