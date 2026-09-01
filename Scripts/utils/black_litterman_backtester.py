@@ -16,6 +16,7 @@ import yfinance as yf
 from pathlib import Path
 import tensorflow as tf
 
+from Scripts.config import FORECAST_HORIZON_DAYS
 from Scripts.data_pipeline.covariance_calculator import CovarianceCalculator
 from Scripts.data_pipeline.features import engineer_features
 from Scripts.data_pipeline.data_collector import DataCollector
@@ -54,9 +55,16 @@ class BlackLittermanBacktester:
         if shares_outstanding is not None:
             shares_outstanding['date'] = pd.to_datetime(shares_outstanding['date'])  # explicitly convert
             shares_outstanding = shares_outstanding.set_index(['date', 'ticker'])
+            shares_outstanding = shares_outstanding.sort_index()
             shares_outstanding.index.names = ['date', 'ticker']
 
             self.shares_outstanding = shares_outstanding
+
+            print(self.shares_outstanding.index[:3])
+            print("Sample ticker from tickers list:", tickers[0])
+            print("Sample ticker from shares index:", self.shares_outstanding.index.get_level_values('ticker')[0])
+
+            print(type(self.shares_outstanding.index.get_level_values('date')[0]))
         else:
             self.shares_outstanding = self.fetch_quarterly_shares()
 
@@ -117,6 +125,9 @@ class BlackLittermanBacktester:
         return preprocessors
 
     def infer_at_date(self, ticker, date):
+        if ticker not in self.models or ticker not in self.preprocessors:
+            return None
+
         df_test_ticker = self.data[self.data['Ticker'] == ticker]
         df_test_ticker = df_test_ticker[df_test_ticker['Date'] <= date].tail(self.window)
 
@@ -149,7 +160,7 @@ class BlackLittermanBacktester:
         return calc.from_prices(prices, trading_days=252)
 
     def get_actual_returns(self, date_start):
-        date_end = date_start + pd.offsets.BDay(21)
+        date_end = date_start + pd.offsets.BDay(FORECAST_HORIZON_DAYS)
 
         window = self.data[
             (pd.to_datetime(self.data['Date']) > date_start) &
@@ -181,7 +192,7 @@ class BlackLittermanBacktester:
 
         bm_returns = []
         for date in results_df['date']:
-            date_end = date + pd.offsets.BDay(21)
+            date_end = date + pd.offsets.BDay(FORECAST_HORIZON_DAYS)
             bm_data = benchmark_df[
                 (pd.to_datetime(benchmark_df['Date']) > date) &
                 (pd.to_datetime(benchmark_df['Date']) <= date_end)
@@ -265,10 +276,10 @@ class BlackLittermanBacktester:
         """
         import yfinance as yf
 
-        path = project_root / 'data' / 'shares_outstanding.csv'
+        path = project_root / 'data' / f'shares_outstanding_{test_date_start}_to_{test_date_end}.csv'
 
         quarterly_dates = pd.date_range(
-            start=self.test_date_start,
+            start=pd.Timestamp(self.test_date_start) - pd.tseries.frequencies.to_offset('QS'),
             end=self.test_date_end,
             freq='QS'
         )
@@ -298,17 +309,29 @@ class BlackLittermanBacktester:
         Market cap = shares outstanding (nearest quarter) x close price at date.
         Falls back to 1e9 if data is missing.
         """
+        date = pd.Timestamp(date)
+
         available_quarters = self.shares_outstanding.index.get_level_values('date').unique()
-        nearest_quarter = available_quarters[available_quarters <= date].max()
+        past_quarters = available_quarters[available_quarters <= date]
+
+        if len(past_quarters) == 0:
+            return pd.Series({ticker: 1e9 for ticker in tickers})
+
+        nearest_quarter = past_quarters.max()
+
+        price_data = self.data.copy()
+        price_data['Date'] = pd.to_datetime(price_data['Date'])
+        price_data = price_data[price_data['Date'] <= date].sort_values('Date')
 
         mcaps = {}
         for ticker in tickers:
             try:
                 shares = self.shares_outstanding.loc[(nearest_quarter, ticker), 'shares']
-                close = self.data[
-                    (self.data['Ticker'] == ticker) &
-                    (pd.to_datetime(self.data['Date']) <= date)
-                    ]['Close'].iloc[-1]
+                close_rows = price_data[price_data['Ticker'] == ticker]['Close']
+                if close_rows.empty:
+                    raise IndexError
+
+                close = close_rows.iloc[-1]
                 mcaps[ticker] = shares * close
             except (KeyError, IndexError):
                 mcaps[ticker] = 1e9
@@ -350,16 +373,12 @@ class BlackLittermanBacktester:
                 'ticker': list(forecasts_at_date.keys()),
                 'forecast_return': list(forecasts_at_date.values()),
                 'test_rmse': [rmses[t] for t in forecasts_at_date],
-                'target_date': date + pd.offsets.BDay(21)
+                'target_date': date + pd.offsets.BDay(FORECAST_HORIZON_DAYS)
             })
 
-            print(f"This is the results: {results_df}")
 
             cov_matrix = self.rolling_covariance(date, lookback=252)
             mcaps = self.get_market_caps(list(forecasts_at_date), date)
-
-            print(f"This is the covariance matrix: {cov_matrix}")
-            print(f"This is the market caps: {mcaps}")
 
             # keys of forecasts_at_date are the tickers
             optimiser = PortfolioOptimiser(cov_matrix)
@@ -393,18 +412,18 @@ class BlackLittermanBacktester:
 
 project_root = Path(__file__).resolve().parents[2]
 
+train_date_start = '2014-02-18'
+train_date_end   = '2024-12-10'
+test_date_start  = '2025-01-01'
+test_date_end    = '2026-01-20'
+
 models_dir       = project_root / 'models'
 preprocessors_dir = project_root / 'models' / 'preprocessors'
 forecast_df      = pd.read_csv(project_root / 'results' / 'results.csv')
 tickers          = sorted(pd.read_csv(project_root / 'data' / 'ESGU_LSTM_Ready.csv')['Ticker'].unique().tolist())
 feature_cols = ['dist_sma200', 'ret_21d', 'momentum_quality', 'dist_high52w', 'efficiency_ratio', 'adx_slope', 'vol_ratio','NATR']
 
-train_date_start = '2014-02-18'
-train_date_end   = '2023-09-08'
-test_date_start  = '2025-01-01'
-test_date_end    = '2026-01-20'
-
-shares_path = project_root / 'data' / 'shares_outstanding.csv'
+shares_path = project_root / 'data' / f'shares_outstanding_{test_date_start}_to_{test_date_end}.csv'
 shares = pd.read_csv(shares_path)
 
 rebalance_dates = pd.date_range(
@@ -423,7 +442,7 @@ backtester = BlackLittermanBacktester(
     train_date_end=train_date_end,
     test_date_start=test_date_start,
     test_date_end=test_date_end,
-    shares_outstanding = shares,
+    shares_outstanding = None,
     resolution='w',
     window=30
 )
@@ -431,13 +450,13 @@ backtester = BlackLittermanBacktester(
 results_df, weights_history = backtester.run(rebalance_dates)
 
 backtest_dir = project_root / 'results' / f'backtest_{test_date_start}_to_{test_date_end}'
+backtest_dir.mkdir(parents=True, exist_ok=True)
+
 
 weights_df = pd.DataFrame(weights_history).T
 weights_df.to_csv(backtest_dir / 'weights_history.csv')
 results_df.to_csv(backtest_dir / 'backtest_results.csv', index=False)
 
-results_df = pd.read_csv(backtest_dir / 'backtest_results.csv')
-weights_df = pd.read_csv(backtest_dir / 'weights_history.csv')
 
 benchmark_df = pd.read_csv(project_root / 'data' / 'ESGU_benchmark.csv')
 
