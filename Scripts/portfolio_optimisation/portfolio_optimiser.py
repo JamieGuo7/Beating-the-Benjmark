@@ -4,6 +4,7 @@ import yfinance as yf
 from pypfopt import black_litterman, BlackLittermanModel, EfficientFrontier, risk_models
 from pypfopt.expected_returns import mean_historical_return
 
+from Scripts.config import FORECAST_HORIZON_DAYS
 from Scripts.data_pipeline.covariance_calculator import CovarianceCalculator
 
 
@@ -20,7 +21,7 @@ class PortfolioOptimiser:
         self.last_bl_model = None
         self.last_ef = None
 
-    def get_market_caps(self, tickers):
+    def get_market_caps(self, tickers, date):
         print(f"[*] Fetching market caps for {len(tickers)} tickers...")
         tickers_obj = yf.Tickers(" ".join(tickers))
         return pd.Series({t: tickers_obj.tickers[t].info.get('marketCap', 1e9) for t in tickers})
@@ -55,29 +56,39 @@ class PortfolioOptimiser:
 
         return omega
 
-    def optimise_black_litterman(self, tickers_raw, forecast_df, method='max_sharpe'):
+    def optimise_black_litterman(self, tickers_raw, forecast_df, mcaps = None, method='max_sharpe', verbose = True):
         """
         Perform Black-Litterman optimisation combining forecasts with market priors.
-        Assumes that forecast_df has 'forecast_return' and 'test_rmse' columns.
+        Assumes that forecast_df has 'forecast_return', 'test_rmse', and 'target_date' columns.
+        In particular 'target_date' is the same for each ticker (usually the case by construction).
 
         Tickers_raw is those tickers in the forecast_df.
         This could differ from tickers returned by align_data.
         """
-
-        print(f"\n{'=' * 70}")
-        print(f"BLACK-LITTERMAN PORTFOLIO OPTIMISATION")
-        print(f"{'=' * 70}")
+        if verbose:
+            print(f"\n{'=' * 70}")
+            print(f"BLACK-LITTERMAN PORTFOLIO OPTIMISATION")
+            print(f"{'=' * 70}")
 
         forecast_df = forecast_df.drop_duplicates(subset='ticker')
         forecast_df = forecast_df[forecast_df['ticker'].isin(tickers_raw)].set_index('ticker')
         forecast_df = forecast_df.dropna(subset=['forecast_return', 'test_rmse'])
+
+        # We take the first one since they are all the same in forecast_df.
+        target_date = pd.Timestamp(forecast_df['target_date'].iloc[0])
+        as_of_date = target_date - pd.offsets.BDay(FORECAST_HORIZON_DAYS)
+
 
         df, S, tickers = self.align_data(forecast_df)
 
         views = (df['forecast_return'] / 100).to_dict()
         rmses = df['test_rmse'].values
 
-        mcaps = self.get_market_caps(tickers)
+        if mcaps is not None:
+            mcaps = pd.Series(mcaps).reindex(tickers).fillna(1e9)
+        else:
+            mcaps = self.get_market_caps(tickers, as_of_date)
+
         pi = black_litterman.market_implied_prior_returns(
             mcaps,
             risk_aversion = self.risk_aversion,
@@ -120,8 +131,8 @@ class PortfolioOptimiser:
         self.last_performance = performance
 
         diagnostics = self.generate_diagnostics(df, S, rmses, omega, ret_bl)
-
-        self.print_report(weights, performance, diagnostics, df)
+        if verbose:
+            self.print_report(weights, performance, diagnostics, df)
 
         return {
             'weights': weights,
@@ -239,19 +250,3 @@ class PortfolioOptimiser:
         weights_df = weights_df[weights_df['weight'] > 0.0001].sort_values('weight', ascending=False)
         weights_df.to_csv(filepath)
         print(f"[*] Weights saved to {filepath}")
-
-# get cov_matrix
-filepath = '../../data/ESGU_LSTM_Ready.csv'
-covariance_calculator = CovarianceCalculator()
-cov_matrix = covariance_calculator.from_csv(filepath)
-
-# get tickers
-df = pd.read_csv(filepath)
-tickers_raw = sorted(df["Ticker"].unique())
-
-forecast_df = pd.read_csv('../../results/results.csv')
-
-portfolio_optimiser = PortfolioOptimiser(cov_matrix)
-portfolio_optimiser.optimise_black_litterman(tickers_raw, forecast_df)
-
-portfolio_optimiser.optimise_markowitz(forecast_df)

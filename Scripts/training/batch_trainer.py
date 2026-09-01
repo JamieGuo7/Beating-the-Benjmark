@@ -5,8 +5,11 @@ from pathlib import Path
 
 class BatchTrainer:
 
-    def __init__(self, ticker_trainer, results_dir='../../results'):
+    def __init__(self, ticker_trainer, models_dir='../../models', plots_dir= '../../plots',
+                 results_dir='../../results'):
         self.ticker_trainer = ticker_trainer
+        self.models_dir = models_dir
+        self.plots_dir = plots_dir
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
 

@@ -104,9 +104,3 @@ collector = DataCollector(
     period = '12y',
     interval = '1d'
 )
-
-collector.append_data()
-
-data = collector.get_clean_data()
-collector.save_data()
-
