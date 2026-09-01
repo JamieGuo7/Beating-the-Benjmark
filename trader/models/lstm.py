@@ -1,4 +1,4 @@
-from .base_predictor import BasePredictor
+from .base import BasePredictor
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential

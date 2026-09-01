@@ -1,6 +1,6 @@
 import joblib
 from sklearn.ensemble import RandomForestRegressor
-from .base_predictor import BasePredictor
+from .base import BasePredictor
 
 class RandomForestPredictor(BasePredictor):
     def __init__(self, n_estimators=100, max_depth=10, random_state=42):

@@ -99,8 +99,8 @@ class DataCollector:
 project_root = Path(__file__).resolve().parents[2]
 
 collector = DataCollector(
-    ticker_path = str(project_root / "data" / "ESGU_Tickers.txt"),
-    file_path = str(project_root / "data" / "ESGU_LSTM_Ready.csv"),
+    ticker_path = str(project_root / "data" / "raw" / "index" / "esgu_tickers.txt"),
+    file_path = str(project_root / "data" / "raw" / "prices" / "esgu_ohlcv_daily.csv"),
     period = '12y',
     interval = '1d'
 )

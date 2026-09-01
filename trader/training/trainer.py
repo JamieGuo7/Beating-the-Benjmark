@@ -4,13 +4,13 @@ import time
 import joblib
 from pathlib import Path
 
-from Scripts.config import FORECAST_HORIZON_DAYS
-from Scripts.data_pipeline.features import engineer_features
-from Scripts.data_pipeline.preprocessing import SequencePreprocessor
-from Scripts.models.lstm_model import LSTMPredictor
-from Scripts.models.callbacks import create_callbacks
-from Scripts.utils.calculate_metrics import calculate_metrics
-from Scripts.utils.plotting import plot_predictions
+from trader.config import FORECAST_HORIZON_DAYS
+from trader.data.features import engineer_features
+from trader.data.preprocessing import SequencePreprocessor
+from trader.models.lstm import LSTMPredictor
+from trader.models.callbacks import create_callbacks
+from trader.evaluation.metrics import calculate_metrics
+from trader.evaluation.plots import plot_predictions
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', 100)

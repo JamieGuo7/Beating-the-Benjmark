@@ -1,14 +1,14 @@
 import pandas as pd
 from pathlib import Path
 
-from Scripts.config import TARGET_COL
-from Scripts.training.ticker_trainer import TickerModelTrainer
-from Scripts.training.batch_trainer import BatchTrainer
+from trader.config import TARGET_COL
+from trader.training.trainer import TickerModelTrainer
+from trader.training.batch import BatchTrainer
 
 
 def load_lstm_data(project_root):
     """ Load preprocessed LSTM-ready data. """
-    data_path = project_root / "data" / "ESGU_LSTM_Ready.csv"
+    data_path = project_root / "data" / "raw" / "prices" / "esgu_ohlcv_daily.csv"
     
     df = pd.read_csv(data_path, parse_dates=["Date"])
     return df
@@ -20,9 +20,13 @@ def main(max_tickers):
     test_date_end = '2023-02-15'
     end_date = '2023-03-18'
 
-    models_dir = project_root / "models" / f"models_{test_date_start}_to_{test_date_end}"
-    plots_dir = project_root / "plots" / f"plots_{test_date_start}_to_{test_date_end}"
-    results_dir = project_root / "results" / f"results_{test_date_start}_to_{test_date_end}"
+    # One Model Training Run == one directory under runs/, named
+    # {test_start}_to_{test_end}_v{n}_{family}. Models, plots and results all
+    # live inside it, so they cannot drift apart. See docs/adr/0002.
+    run_dir = project_root / "runs" / f"{test_date_start}_to_{test_date_end}_v1_lstm"
+    models_dir = run_dir / "models"
+    plots_dir = run_dir / "plots"
+    results_dir = run_dir
 
     models_dir.mkdir(parents=True, exist_ok=True)
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,7 @@ def main(max_tickers):
         return
 
     batch_trainer.save_results("results.csv")
-    batch_trainer.save_forecasts("latest_forecasts.csv")
+    batch_trainer.save_forecasts("forecasts.csv")
     batch_trainer.print_summary()
 
 

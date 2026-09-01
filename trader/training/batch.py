@@ -71,7 +71,7 @@ class BatchTrainer:
 
         print(f"[*] Results saved to {filepath}")
 
-    def save_forecasts(self, filename='latest_forecasts.csv'):
+    def save_forecasts(self, filename='forecasts.csv'):
         if self.results_df is None:
             raise ValueError("No results to save. Run train_all() first.")
 

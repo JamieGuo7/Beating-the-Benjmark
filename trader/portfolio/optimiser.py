@@ -4,8 +4,8 @@ import yfinance as yf
 from pypfopt import black_litterman, BlackLittermanModel, EfficientFrontier, risk_models
 from pypfopt.expected_returns import mean_historical_return
 
-from Scripts.config import FORECAST_HORIZON_DAYS
-from Scripts.data_pipeline.covariance_calculator import CovarianceCalculator
+from trader.config import FORECAST_HORIZON_DAYS
+from trader.portfolio.covariance import CovarianceCalculator
 
 
 class PortfolioOptimiser:

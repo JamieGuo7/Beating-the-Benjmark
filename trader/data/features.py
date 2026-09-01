@@ -1,7 +1,7 @@
 import numpy as np
 import ta
 
-from Scripts.config import FORECAST_HORIZON_DAYS, TARGET_COL
+from trader.config import FORECAST_HORIZON_DAYS, TARGET_COL
 
 def engineer_features(df):
     """ Engineer technical indicators and features. """

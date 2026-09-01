@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from Scripts.utils.calculate_metrics import calculate_metrics
+from trader.evaluation.metrics import calculate_metrics
 
 
 def plot_predictions(
