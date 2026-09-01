@@ -1,9 +1,16 @@
 import numpy as np
 import ta
 
+from Scripts.config import FORECAST_HORIZON_DAYS, TARGET_COL
+
 def engineer_features(df):
     """ Engineer technical indicators and features. """
     df = df.copy()
+
+    # Volatility
+    df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'],
+                                                 df['Close'])
+    df['NATR'] = (df['ATR'] / df['Close']) * 100
 
     # Trend
     df['sma_200'] = df['Close'].rolling(window=200).mean()
@@ -28,15 +35,11 @@ def engineer_features(df):
                              df['Close'])
     df['adx_slope'] = df['ADX'].diff(5)
 
+
     # Volume
     df['vol_ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
 
-    # Volatility
-    df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'],
-                                                 df['Close'])
-    df['NATR'] = (df['ATR'] / df['Close']) * 100
-
     # Forward Return Target
-    df['21 Day Forward Return'] = np.log(df['Close'].shift(-21) / df['Close'])
+    df[TARGET_COL] = np.log(df['Close'].shift(-FORECAST_HORIZON_DAYS) / df['Close'])
 
     return df

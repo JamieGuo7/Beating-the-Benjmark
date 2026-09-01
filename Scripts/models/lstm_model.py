@@ -6,13 +6,13 @@ from tensorflow.keras.layers import Input, LSTM, Dense, Dropout, LeakyReLU
 from tensorflow.keras.optimizers import Adam
 
 
-def directional_loss(y_true, y_pred):
+def directional_loss(y_true, y_pred, penalty_weight = 0.1):
     """ Custom loss function which penalises incorrect direction """
     huber = tf.keras.losses.Huber()(y_true, y_pred)
-    sign_penalty = tf.reduce_mean(
-        tf.abs(tf.sign(y_true) - tf.sign(y_pred))
-    )
-    return huber + 0.5 * sign_penalty
+
+    direction_error = tf.maximum(0.0, -y_true * y_pred)
+
+    return huber + (penalty_weight * tf.reduce_mean(direction_error))
 
 class LSTMPredictor:
     """ LSTM Model for time series prediction """

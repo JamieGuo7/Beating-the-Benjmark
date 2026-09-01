@@ -1,7 +1,10 @@
 import pandas as pd
 import numpy as np
 import time
+import joblib
+from pathlib import Path
 
+from Scripts.config import FORECAST_HORIZON_DAYS
 from Scripts.data_pipeline.features import engineer_features
 from Scripts.data_pipeline.preprocessing import SequencePreprocessor
 from Scripts.models.lstm_model import LSTMPredictor
@@ -9,13 +12,17 @@ from Scripts.models.callbacks import create_callbacks
 from Scripts.utils.calculate_metrics import calculate_metrics
 from Scripts.utils.plotting import plot_predictions
 
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', 100)
+
 class TickerModelTrainer:
-    def __init__(self, feature_cols, target_col, window=30,
+    def __init__(self, feature_cols, target_col, window=30, horizon=FORECAST_HORIZON_DAYS,
                  epochs=100, batch_size=32, learning_rate=0.005,
                  models_dir='../../models', plots_dir='../../plots'):
         self.feature_cols = feature_cols
         self.target_col = target_col
         self.window = window
+        self.horizon = horizon  # must match the forward-return shift in engineer_features
         self.epochs = epochs
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -61,22 +68,32 @@ class TickerModelTrainer:
         print(f"[*] Sequences: {X.shape[0]}")
 
         # df_ticker still has all columns, and still has NaN's
-        return X, y, df_ticker
+        return X, y, df_ticker, df_ticker_truncated
 
-    def split_data(self, X, y, train_ratio=0.80, val_ratio=0.10):
+    def split_data(self, X, y, df_truncated, train_ratio=0.80, val_ratio=0.10):
+        dates = df_truncated.index[self.window - 1:]
+
         train_size = int(len(X) * train_ratio)
         val_size = int(len(X) * val_ratio)
 
-        X_train = X[:train_size]
-        y_train = y[:train_size]
+        print(f"\n[i] Date Ranges:")
+        print(f"    Train: {dates[0].date()} to {dates[train_size - 1].date()}")
+        print(f"    Val:   {dates[train_size].date()} to {dates[train_size + val_size - 1].date()}")
+        print(f"    Test:  {dates[train_size + val_size].date()} to {dates[-1].date()}\n")
 
-        X_val = X[train_size:train_size + val_size]
-        y_val = y[train_size:train_size + val_size]
+        # Purge the last `horizon` samples of train and val: their labels are
+        # forward-looking by `horizon` days, so without this they'd be computed
+        # from prices that the very next split then sees as an input feature.
+        X_train = X[:train_size - self.horizon]
+        y_train = y[:train_size - self.horizon]
+
+        X_val = X[train_size:train_size + val_size - self.horizon]
+        y_val = y[train_size:train_size + val_size - self.horizon]
 
         X_test = X[train_size + val_size:]
         y_test = y[train_size + val_size:]
 
-        print(f"   Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+        print(f"   Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)} (purged {self.horizon} samples at each boundary)")
         return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
     def train(self, ticker, df_ticker):
@@ -85,15 +102,23 @@ class TickerModelTrainer:
         print(f"{'=' * 70}")
 
         # Prepare data
-        X, y, df_full = self.prepare_data(df_ticker)
+        X, y, df_full, df_truncated = self.prepare_data(df_ticker)
 
         # Split
-        (X_train, y_train), (X_val, y_val), (X_test, y_test) = self.split_data(X, y)
+        (X_train, y_train), (X_val, y_val), (X_test, y_test) = self.split_data(X, y, df_truncated)
 
         # Preprocess
         X_train_scaled, y_train_scaled = self.preprocessor.fit_transform(X_train, y_train)
         X_val_scaled, y_val_scaled = self.preprocessor.transform(X_val, y_val)
         X_test_scaled, y_test_scaled = self.preprocessor.transform(X_test, y_test)
+
+        # Save preprocessor (helpful for backtesting)
+        preprocessor_dir = Path(self.models_dir) / "preprocessors"
+        preprocessor_dir.mkdir(parents=True, exist_ok=True)
+
+        preprocessor_path = preprocessor_dir / f"{ticker}_preprocessor.joblib"
+        joblib.dump(self.preprocessor, preprocessor_path)
+        print(f"[*] Saved preprocessor state to {preprocessor_path}")
 
         # Build model
         input_shape = (X_train_scaled.shape[1], X_train_scaled.shape[2])
@@ -192,7 +217,6 @@ class TickerModelTrainer:
 
     def generate_forecast(self, df_full):
         df_inference = df_full.tail(self.window).copy()
-
         if len(df_inference) < self.window:
             return None, None
 
@@ -209,7 +233,7 @@ class TickerModelTrainer:
         forecast_log = self.preprocessor.inverse_transform_y(forecast_scaled)[0]
         forecast_pct = (np.exp(forecast_log) - 1) * 100
 
-        forecast_target_date = df_inference.index[-1] + pd.offsets.BDay(21)
+        forecast_target_date = df_inference.index[-1] + pd.offsets.BDay(self.horizon)
 
         return forecast_pct, forecast_target_date.date()
 
