@@ -1,7 +1,4 @@
-# Model Training Runs. The bulk is regenerable and large (~500MB of .keras,
-# .joblib and .png), but the *record* a run leaves behind - per-ticker metrics,
-# forecasts and backtest results - is small and is the provenance trail
-# ADR-0001 exists to protect. So: ignore the run contents, keep the record.
+# Model Training Runs
 /runs/**
 !/runs/*/
 !/runs/*.csv
@@ -12,15 +9,12 @@
 !/runs/*/backtests/
 !/runs/*/backtests/**
 
-# The oversized raw price files (>200MB each, would fail a push).
-# Everything else under data/ stays tracked as it was.
+# Large Data files
 /data/raw/prices/esgu_ohlcv_daily.csv
 /data/raw/prices/esgu_ohlcv_daily.backup.csv
 /data/raw/prices/esgu_historical_2014_2026.csv
 
-# Test artefacts. tests/test_ticker_trainer.py trains a real model into these,
-# relative to the working directory, so running pytest from the repo root
-# leaves a .keras, a .joblib and a plot behind every time.
+# Models and plots
 /.tmp_models/
 /.tmp_plots/
 
@@ -33,5 +27,5 @@ __pycache__/
 folder_tree.txt
 /scratch
 
-# Aaron's ratio analysis lives on the aaron-key-ratios branch, not main.
+# Exploration
 /Key ratios and momentums/
